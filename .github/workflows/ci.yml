@@ -1,0 +1,32 @@
+name: Day 2 CI
+run-name: "Day 2 CI triggered by @${{ github.actor }}"
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: "Python version"
+        type: choice
+        options:
+          - "3.12"
+          - "3.13"
+        default: "3.13"
+      create-package:
+        description: "Build the package?"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "0 7 * * 1"
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "skeleton works"
