@@ -8,6 +8,7 @@ on:
       - "**.md"
       - "docs/**"
   pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       python-version:
@@ -23,6 +24,12 @@ on:
         default: true
   schedule:
     - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: temperature
 
 jobs:
   test:
@@ -49,12 +56,20 @@ jobs:
 
   package:
     needs: test
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.create-package == false) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute version
+        id: ver
+        run: echo "version=0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Build package
-        run: echo "packaging (placeholder)"
+        run: echo "packaging version ${{ steps.ver.outputs.version }} (placeholder)"
 
   verify:
     needs: package
@@ -64,16 +79,57 @@ jobs:
       - name: Verify package
         run: echo "verifying (placeholder)"
 
+  pr-comment:
+    needs: package
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment on PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          VERSION: ${{ needs.package.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body "✅ CI passed. Package version $VERSION is ready."
+
   report:
     needs: [test, package]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      HAS_TOKEN: ${{ secrets.NOTIFY_TOKEN != '' }}
     steps:
-      - name: Print results
+      - name: Write job summary
         env:
+          TITLE: ${{ vars.REPORT_TITLE }}
+          VERSION: ${{ needs.package.outputs.version }}
           TEST_RESULT: ${{ needs.test.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
         run: |
-          echo "test:    $TEST_RESULT"
-          echo "package: $PACKAGE_RESULT"
+          {
+            echo "# $TITLE"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| App | $APP_NAME |"
+            echo "| Version | ${VERSION:-n/a} |"
+            echo "| Commit | ${SHA::7} |"
+            echo "| Event | $EVENT |"
+            echo "| test | $TEST_RESULT |"
+            echo "| package | $PACKAGE_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify
+        if: env.HAS_TOKEN == 'true'
+        env:
+          TOKEN: ${{ secrets.NOTIFY_TOKEN }}
+        run: |
+          echo "Notification sent (token length: ${#TOKEN})"
